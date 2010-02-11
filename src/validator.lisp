@@ -280,6 +280,11 @@
     (handler-case
         (py-configparser:get-option
          (config vc) section-name option-name :expand expand)
+      (py-configparser:no-section-error (c)
+        (declare (ignore c))
+        (if default-supplied-p
+            default
+            (error 'py-configparser:no-section-error)))
       (py-configparser:no-option-error (c)
         (declare (ignore c))
         (if default-supplied-p
