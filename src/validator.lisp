@@ -23,10 +23,49 @@
 
 (define-condition no-option-error (error)
   ((section-name :initarg :section-name :reader c/section-name)
-   (option-name :initarg :option-name :reader c/option-name))
+   (option-name :initarg :option-name :reader c/option-name)))
+
+(define-condition no-section-error (error)
+  ((section-name :initarg :section-name :reader c/section-name)
+   (option-name :initarg :option-name :reader c/option-name)))
+
+(define-condition no-conf-option-error (no-option-error) ()
   (:report (lambda (c s)
-             (format s "No option \"~a\" in section \"~a\"."
+             (format s "No conf option \"~a\" in section \"~a\"."
                      (c/option-name c) (c/section-name c)))))
+
+(define-condition no-spec-option-error (no-option-error) ()
+  (:report (lambda (c s)
+             (format s "No spec option \"~a\" in section \"~a\"."
+                     (c/option-name c) (c/section-name c)))))
+
+(define-condition no-section-error (error)
+  ((section-name :initarg :section-name :reader c/section-name)))
+
+(define-condition no-conf-section-error (no-section-error) ()
+  (:report (lambda (c s)
+             (format s "No conf section \"~a\"." (c/section-name c)))))
+
+(define-condition no-spec-section-error (no-section-error) ()
+  (:report (lambda (c s)
+             (format s "No spec section \"~a\"." (c/section-name c)))))
+
+(defmacro with-config-errors ((section-name option-name &key (spec nil))
+                              &body body)
+  (let ((c (gensym)))
+    `(handler-case
+         (progn ,@body)
+       ,(when section-name
+          `(py-configparser:no-section-error (,c)
+             (declare (ignore ,c))
+             (error ',(if spec 'no-spec-section-error 'no-conf-section-error)
+                    :section-name ,section-name)))
+       ,(when option-name
+          `(py-configparser:no-option-error (,c)
+             (declare (ignore ,c))
+             (error ',(if spec 'no-spec-option-error 'no-conf-option-error)
+                    :section-name ,section-name
+                    :option-name ,option-name))))))
 
 (defclass spec-value ()
   ((%value :initform nil :initarg :value :reader spec-value)))
@@ -229,49 +268,54 @@
    (%conf :initarg :conf :initform nil :reader config)))
 
 (defun get-spec-option (vc section-name option-name
-                        &key (expand t) (spec-key #'identity))
-  (py-configparser:get-option
-   (spec-config vc) (funcall spec-key section-name) option-name :expand expand))
+                        &key (expand t) (key #'identity))
+  (let ((spec-section (funcall key section-name)))
+    (with-config-errors (spec-section option-name :spec t)
+      (py-configparser:get-option
+       (spec-config vc) spec-section option-name :expand expand))))
 
 (defun get-conf-option (vc section-name option-name
-                        &key (expand t) (spec-value nil))
-  (handler-case
-      (py-configparser:get-option
-       (config vc) section-name option-name :expand expand)
-    (py-configparser:no-option-error (c)
-      (declare (ignore c))
-      spec-value)))
+                        &key (expand t) (default nil default-supplied-p))
+  (with-config-errors (section-name option-name)
+    (handler-case
+        (py-configparser:get-option
+         (config vc) section-name option-name :expand expand)
+      (py-configparser:no-option-error (c)
+        (declare (ignore c))
+        (if default-supplied-p
+            default
+            (error 'py-configparser:no-option-error))))))
 
 (defun get-option (vc section-name option-name
-                   &key (expand t) (spec-key #'identity))
-  (handler-case
-      (let* ((spec-option (get-spec-option vc section-name option-name
-                                           :expand expand
-                                           :spec-key spec-key))
-             (conf-option (get-conf-option vc section-name option-name
-                                           :expand expand
-                                           :spec-value spec-option)))
-        (validate-value spec-option conf-option))
-    (py-configparser:no-option-error (c)
-      (error 'no-option-error
-             :section-name section-name :option-name option-name))))
+                   &key (expand t) (key #'identity))
+  (let* ((spec-option (get-spec-option vc section-name option-name
+                                       :expand expand
+                                       :key key))
+         (conf-option (get-conf-option vc section-name option-name
+                                       :expand expand
+                                       :default spec-option)))
+    (validate-value spec-option conf-option)))
 
-(defun items (vc section-name &key (expand t) (spec-key #'identity))
-  (let* ((config-items
-          (py-configparser:items (config vc) section-name :expand expand))
-         (spec-items
-          (py-configparser:items
-           (spec-config vc) (funcall spec-key section-name) :expand expand))
-         (valid-config
-          (loop :for (k . v) :in config-items
-                :for spec := (py-configparser:get-option
-                              (spec-config vc)
-                              (funcall spec-key section-name)
-                              k :expand nil)
-                :collect (cons k (validate-value spec v))))
+(defun spec-items (vc section-name &key (key #'identity) (expand t))
+  (let ((spec-section (funcall key section-name)))
+    (with-config-errors (spec-section nil :spec t)
+      (py-configparser:items (spec-config vc) spec-section :expand expand))))
+
+(defun conf-items (vc section-name &key (expand t))
+  (with-config-errors (section-name nil)
+    (py-configparser:items (config vc) section-name :expand expand)))
+
+(defun items (vc section-name &key (expand t) (key #'identity))
+  (let* ((spec-items (spec-items vc section-name :key key :expand expand))
+         (conf-items (conf-items vc section-name :expand expand))
          (valid-spec
           (loop :for (k . v) :in spec-items
-                :collect (cons k (validate-value v nil)))))
+                :collect (cons k (validate-value v nil))))
+         (valid-config
+          (loop :for (k . v) :in conf-items
+                :for spec := (get-spec-option vc section-name k
+                                 :key key :expand nil)
+                :collect (cons k (validate-value spec v)))))
     (union valid-spec valid-config :key #'car :test #'string=)))
 
 (defun sections (vc)
