@@ -13,4 +13,5 @@
     :serial t
     :components ((:module "src"
                   :components ((:file "package")
-                               (:file "validator")))))
+                               (:file "validator")
+                               (:file "config")))))

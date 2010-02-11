@@ -7,6 +7,6 @@
            #:items
            #:sections
            #:validated-config
-           #:spec-config
-           #:config
+           #:vc-spec
+           #:vc-conf
            #:print-config))
