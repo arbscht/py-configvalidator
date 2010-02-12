@@ -50,23 +50,6 @@
   (:report (lambda (c s)
              (format s "No spec section \"~a\"." (c/section-name c)))))
 
-(defmacro with-config-errors ((section-name option-name &key (spec nil))
-                              &body body)
-  (let ((c (gensym)))
-    `(handler-case
-         (progn ,@body)
-       ,(when section-name
-          `(py-configparser:no-section-error (,c)
-             (declare (ignore ,c))
-             (error ',(if spec 'no-spec-section-error 'no-conf-section-error)
-                    :section-name ,section-name)))
-       ,(when option-name
-          `(py-configparser:no-option-error (,c)
-             (declare (ignore ,c))
-             (error ',(if spec 'no-spec-option-error 'no-conf-option-error)
-                    :section-name ,section-name
-                    :option-name ,option-name))))))
-
 (defclass spec-value ()
   ((%value :initform nil :initarg :value :reader spec-value)))
 

@@ -2,6 +2,23 @@
 
 (declaim (optimize (speed 3) (safety 0) (debug 0)))
 
+(defmacro with-config-errors ((section-name option-name &key (spec nil))
+                              &body body)
+  (let ((c (gensym)))
+    `(handler-case
+         (progn ,@body)
+       ,@(when section-name
+          `((py-configparser:no-section-error (,c)
+              (declare (ignore ,c))
+              (error ',(if spec 'no-spec-section-error 'no-conf-section-error)
+                     :section-name ,section-name))))
+       ,@(when option-name
+           `((py-configparser:no-option-error (,c)
+              (declare (ignore ,c))
+              (error ',(if spec 'no-spec-option-error 'no-conf-option-error)
+                     :section-name ,section-name
+                     :option-name ,option-name)))))))
+
 (defclass validated-config ()
   ((%spec :initarg :spec :initform nil :reader vc-spec)
    (%conf :initarg :conf :initform nil :reader vc-conf)))
